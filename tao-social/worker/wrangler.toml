@@ -1,0 +1,84 @@
+# Cloudflare Worker: phục vụ CẢ giao diện (web tĩnh trong ../web/out) LẪN API (/api/*) trên cùng 1 địa chỉ
+# -> đăng nhập giữ bằng cookie HttpOnly, không cần CORS.
+name = "social-creator"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# Ghi chú: "node_compat = true" là cách khai báo cũ, Wrangler v4 đã bỏ và sẽ báo lỗi.
+# Cách mới tương đương (bắt buộc cho Puppeteer):
+compatibility_flags = ["nodejs_compat"]
+
+# Không mở địa chỉ workers.dev riêng cho Worker chính — người dùng vào qua cổng "seongon" (thư mục gateway/).
+workers_dev = false
+preview_urls = false
+
+# Chạy phần API ở trung tâm dữ liệu gần Google Cloud us-central1 (Mỹ):
+# nếu để mặc định, người dùng ở Việt Nam thường được phục vụ từ Hồng Kông — nơi Gemini API (AI Studio)
+# từ chối với lỗi "User location is not supported for the API use".
+[placement]
+region = "gcp:us-central1"
+
+# placement ở trên chỉ là gợi ý. Chắc chắn hơn: mọi lệnh gọi Gemini đi qua trạm chuyển tiếp (Durable Object)
+# đặt cố định ở miền Tây nước Mỹ — xem src/egress.ts. Gói miễn phí dùng được loại lưu trữ SQLite.
+[[durable_objects.bindings]]
+name = "US_EGRESS"
+class_name = "UsEgress"
+
+[[migrations]]
+tag = "v1-us-egress"
+new_sqlite_classes = ["UsEgress"]
+
+# Giao diện: build trước bằng `npm --prefix ../web run build`
+[assets]
+directory = "../web/out"
+binding = "ASSETS"
+not_found_handling = "404-page"
+run_worker_first = ["/api/*"]
+
+# Kho dữ liệu: phiên đăng nhập, mã OTP, dự án (khoá được mã hoá), lịch sử chạy
+[[kv_namespaces]]
+binding = "DATA"
+id = "<KV_NAMESPACE_ID>"
+
+# Cơ sở dữ liệu D1 (100.000 lần ghi/ngày miễn phí) — cho công cụ ghi nhiều như Thư ký công việc
+[[d1_databases]]
+binding = "DB"
+database_name = "tro-ly-ai"
+database_id = "<D1_DATABASE_ID>"
+migrations_dir = "migrations"
+
+# Nhắc việc qua Lark: chạy 15 phút/lần (giờ VN tính trong code). Gói miễn phí cho tối đa 5 lịch.
+[triggers]
+crons = ["*/15 * * * *", "* * * * *"]
+
+# Trình duyệt ẩn Cloudflare Browser Rendering — dùng cho Google Sites
+[browser]
+binding = "MYBROWSER"
+
+[observability]
+enabled = true
+
+# Biến KHÔNG bí mật. Bí mật cài bằng `npx wrangler secret put TÊN`:
+#   ENCRYPTION_KEY (mã hoá khoá người dùng), BREVO_API_KEY (gửi mã đăng nhập), GEMINI_API_KEY (khoá chung, không bắt buộc)
+[vars]
+AI_PROVIDER = "gemini"          # "gemini" hoặc "openai"
+GEMINI_MODEL = "gemini-3.8-flash"
+OPENAI_MODEL = "gpt-4.1-mini"
+ALLOWED_EMAIL_DOMAINS = "seongon.com"   # email thuộc tên miền này được đăng nhập (nhiều tên miền: cách nhau dấu phẩy)
+ALLOWED_EMAILS = "<email-ngoai-1>,<email-ngoai-2>"   # thêm từng email ngoài (CTV, khách), cách nhau dấu phẩy
+# Email người gửi — phải được xác minh trong Brevo (Senders). Dùng Gmail vì seongon.com chưa xác thực tên miền trong Brevo
+# (gửi dưới tên @seongon.com bị Google Workspace đẩy vào Spam). Khi IT xác thực xong seongon.com thì đổi lại <email>@seongon.com.
+MAIL_FROM = "<email-gui-da-xac-minh-brevo>"
+MAIL_FROM_NAME = "SEONGON Social"
+
+# Lộ trình học tập (/hoc-tap): địa chỉ ứng dụng web Apps Script, kết thúc bằng /exec.
+# Khoá chung HOC_TAP_SECRET là bí mật -> cài bằng `npx wrangler secret put HOC_TAP_SECRET`
+# (lấy đúng chuỗi "Khoá kết nối" trong tab Quản lý của hệ thống học tập).
+HOC_TAP_URL = "<link-web-app-apps-script>"
+
+# Địa chỉ cổng — dùng cho nút "Mở công cụ" trong tin nhắn Lark.
+# Bot Lark: LARK_APP_ID, LARK_APP_SECRET là bí mật -> cài bằng `npx wrangler secret put ...`
+PUBLIC_URL = "https://seongon.tro-ly-ai.workers.dev"
+
+# Share social đa kênh (chạy trên Netlify): cổng ký vé đăng nhập. Khoá ký SHARE_SIGNING_KEY là bí mật (wrangler secret).
+SHARE_URL = "https://quan-ly-cong-viec-sn.netlify.app"
